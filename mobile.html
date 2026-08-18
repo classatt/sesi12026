@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0F2344">
+<title>Scan QR · KPMIM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          primary: '#2563EB',
+          'primary-dark': '#1D4ED8',
+          navy: '#0F2344',
+          page: '#F2F5FA',
+          ink: '#111827',
+          muted: '#6B7280',
+          line: '#E5E7EB',
+          success: '#16A34A',
+          danger: '#DC2626',
+          wa: '#25D366'
+        },
+        fontFamily: {
+          sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif']
+        }
+      }
+    }
+  };
+</script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  html, body { height: 100%; }
+  body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+  .scroll-thin::-webkit-scrollbar{width:4px;height:4px;}
+  .scroll-thin::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:4px;}
+  .no-tap{ -webkit-tap-highlight-color: transparent; }
+  .stamp{
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) scale(0.4) rotate(-8deg);
+    font-weight:800; font-size:2.2rem; color:#16A34A;
+    border:5px solid #16A34A; padding:8px 26px; border-radius:10px; opacity:0;
+    pointer-events:none; z-index:90; background:rgba(255,255,255,.95);
+    animation:stampIn 1.1s ease-out forwards;
+  }
+  @keyframes stampIn{
+    0%{ opacity:0; transform:translate(-50%,-50%) scale(1.6) rotate(-8deg); }
+    30%{ opacity:1; transform:translate(-50%,-50%) scale(0.9) rotate(-8deg); }
+    45%{ transform:translate(-50%,-50%) scale(1.05) rotate(-8deg); }
+    70%{ opacity:1; transform:translate(-50%,-50%) scale(1) rotate(-8deg); }
+    100%{ opacity:0; transform:translate(-50%,-50%) scale(1) rotate(-8deg); }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="module">
+import * as React from "https://esm.sh/react@18.3.1";
+import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
+import htm from "https://esm.sh/htm@3.1.1";
+import * as L from "https://esm.sh/lucide-react@0.441.0?deps=react@18.3.1&target=es2022";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getFirestore, collection, doc, setDoc, addDoc, getDocs, deleteDoc,
+  query, where, orderBy, onSnapshot, serverTimestamp, limit
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const _h = (type, props, ...children) => React.createElement(type === '' || type === '<>' ? React.Fragment : type, props, ...children);
+const html = htm.bind(_h);
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ============================================================
+// CONFIG (sama dgn index.html — jangan ubah)
+// ============================================================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCNt5tpFfSjjNKeSiJXoDrkoSBCy0ILWTI",
+  authDomain: "kpmim-attendance.firebaseapp.com",
+  databaseURL: "https://kpmim-attendance-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "kpmim-attendance",
+  storageBucket: "kpmim-attendance.firebasestorage.app",
+  messagingSenderId: "675414396402",
+  appId: "1:675414396402:web:9b0685f14332f59b00ef6b"
+};
+const SUPABASE_URL = 'https://fbsihmlqldfwvfaouacg.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_A8PufySiAsUQbNmutyTYng_jEd7aqQa';
+const APPS_SCRIPT_URL = "PASTE_APPS_SCRIPT_WEB_APP_URL_DI_SINI";
+const LS_URL_KEY = 'kpmim_apps_script_url';
+const LS_SAVED = 'kpmim_saved_sessions';
+const REKOD_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1vw9HdYAxqlO-mwY8TFW7M5J-tcJEdCvdV2SqznnuV8w/edit';
+const REKOD_GID = '2014121726';
+const getScriptUrl = () => {
+  try { const v = (localStorage.getItem(LS_URL_KEY) || '').trim(); if (v) return v; } catch (e) {}
+  return APPS_SCRIPT_URL;
+};
+const getRekodUrl = () => { try { return (localStorage.getItem('kpmim_rekod_url') || '').trim() || REKOD_SHEET_URL; } catch (e) { return REKOD_SHEET_URL; } };
+const getRekodGid = () => { try { return (localStorage.getItem('kpmim_rekod_gid') || '').trim() || REKOD_GID; } catch (e) { return REKOD_GID; } };
+
+const LECTURER_MAP = {
+  '292371': 'MUHAMAD IKHWAN BIN DERAMAN',
+  '289481': 'WAN NOORASHIKIN BINTI WAN SHAMSUDDIN',
+  '289494': 'MUHAMMAD FAYYADH BIN MOHD AZMI'
+};
+const LS_LECTURER = 'kpmim_current_lecturer';
+
+const getCurrentLecturer = () => { try { const v = localStorage.getItem(LS_LECTURER); return v ? JSON.parse(v) : null; } catch (e) { return null; } };
+const saveCurrentLecturer = (l) => { try { localStorage.setItem(LS_LECTURER, JSON.stringify(l)); } catch (e) {} };
+const clearCurrentLecturer = () => { try { localStorage.removeItem(LS_LECTURER); } catch (e) {} };
+
+const MONTHS = ['Januari','Februari','Mac','April','Mei','Jun','Julai','Ogos','September','Oktober','November','Disember'];
+const fmtDate = d => d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+const fmtClock = d => {
+  let h = d.getHours(), m = d.getMinutes();
+  const suf = h >= 12 ? 'PTG' : 'PG';
+  let h12 = h % 12; if (h12 === 0) h12 = 12;
+  return h12 + ':' + String(m).padStart(2,'0') + ' ' + suf;
+};
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+const nowHHMM = () => { const d = new Date(); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
+const addHours = (t, h) => {
+  const [hh, mm] = String(t).split(':').map(Number);
+  if ([hh, mm].some(isNaN)) return t;
+  const d = new Date(2020, 0, 1, hh, mm);
+  d.setMinutes(d.getMinutes() + Math.round((h || 0) * 60));
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+};
+const ini = n => { const p = String(n||'').trim().split(' '); return ((p[0]?p[0][0]:'')+(p[1]?p[1][0]:'')).toUpperCase() || '?'; };
+const cleanPhone = p => { if (!p) return ''; p = String(p).replace(/\D/g,''); if (p.indexOf('0')===0) p = '6'+p; return p; };
+const extractDriveId = url => { if (!url) return ''; const m = String(url).match(/[-\w]{25,}/); return m ? m[0] : ''; };
+const studentIdOf = s => String(s.ID || s.id || s['No. Matrik'] || s.no || '');
+const studentNameOf = s => s.Nama || s.name || 'Tanpa nama';
+const readLS = (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } };
+const writeLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const withTimeout = (p, ms, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error((label || 'Operasi') + ' mengambil masa terlalu lama')), ms))]);
+const durationH = (start, end) => {
+  const [sh, sm] = String(start).split(':').map(Number);
+  const [eh, em] = String(end).split(':').map(Number);
+  if ([sh, sm, eh, em].some(isNaN)) return 0;
+  const mins = (eh * 60 + em) - (sh * 60 + sm);
+  return mins > 0 ? Math.round((mins / 60) * 4) / 4 : 0;
+};
+const durBadge = (s, e) => {
+  if (!s || !e) return '';
+  const [sh, sm] = String(s).split(':').map(Number), [eh, em] = String(e).split(':').map(Number);
+  if ([sh, sm, eh, em].some(isNaN)) return '';
+  let d = (eh * 60 + em) - (sh * 60 + sm); if (d < 0) d += 1440;
+  return Math.floor(d/60) + 'j ' + (d%60) + 'm';
+};
+
+// ---- Normalisasi pelajar dari Supabase (sama dgn index.html) ----
+// ---- Pemetaan subjek kelas (khas pensyarah FAYYADH) ----
+const DEC_SUBJECT_MAP = {
+  'DEC1A': 'FLG 1202 - Mandarin 1',
+  'DEC1D': 'ITE 1133 - Introduction of Information Technology Applications and Multimedia'
+};
+const decSubjectFor = (o) => {
+  const src = String((o && o.source_name) || '').trim().toUpperCase();
+  if (!src.includes('FAYYADH')) return '';
+  const k = String((o && o.registered_class) || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return DEC_SUBJECT_MAP[k] || '';
+};
+
+function normalizeStudent(o) {
+  if (!o || typeof o !== 'object') return null;
+  const id = String(o.no_matrik || '').trim();
+  const name = String(o.nama || '').trim().toUpperCase();
+  if (!id || !name) return null;
+  return {
+    id, name,
+    source_name: String(o.source_name || '').trim().toUpperCase(),
+    nickname: String(o.nama_panggilan || '').trim(),
+    phone: cleanPhone(o.no_telefon || ''),
+    mentor: String(o.mentor || '').trim(),
+    mentorPhone: cleanPhone(o.no_mentor || o.no_wa_mentor || ''),
+    guardian: String(o.nama_penjaga || '').trim(),
+    guardianPhone: cleanPhone(o.no_telefon_penjaga || ''),
+    resident: String(o.status_kediaman || '').toLowerCase().includes('non') ? 'non-resident' : 'resident',
+    kelas: String(o.registered_class || '').trim().toUpperCase(),
+    subjek: decSubjectFor(o),
+    sesiId: String(o.semester || '').trim(),
+    photoFileId: extractDriveId(o.gambar_pelajar || o.image_url_1 || ''),
+    local: false,
+    supabaseId: o.id || '',
+    classId: o.class_id || '',
+    semester: o.semester || '',
+    program: o.program || ''
+  };
+}
+
+const subjCodeOf = (c) => {
+  const sn = String((c && c.subjName) || '').trim();
+  if (!sn) return '';
+  const i = sn.indexOf(' - ');
+  return i > 0 ? sn.slice(0, i).trim() : '';
+};
+const classLabel = (c) => {
+  if (!c) return '';
+  const code = (c.code || '').trim();
+  const name = (c.className || '').trim();
+  const display = subjCodeOf(c) || code;
+  if (display && name) return display + ' ' + name;
+  return name || display || (c.className || '');
+};
+const normKlas = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+const groupOf = (cls) => {
+  const code = normKlas(cls.code);
+  const toks = String(cls.className || '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  const kept = toks.filter(t => !(code && code.includes(t)));
+  return kept.join('');
+};
+const stuInClass = (cls, s) => {
+  if (!cls || !s) return true;
+  const k = normKlas(s.kelas);
+  if (!k) return false;
+  const code = normKlas(cls.code);
+  const name = normKlas(cls.className);
+  const label = normKlas(classLabel(cls));
+  const prog = (code || '').replace(/\d+/g, '');
+  if (name && k.includes(name)) return true;
+  if (label && k.includes(label)) return true;
+  const group = groupOf(cls);
+  if (group && k.includes(group)) {
+    if (!prog || k.includes(prog)) return true;
+  }
+  if (code && k.includes(code)) {
+    const rem = k.replace(code, '');
+    if (!rem) return true;
+    return group ? (rem.includes(group) || k.includes(name)) : true;
+  }
+  if (k.length >= 2 && name.includes(k)) return true;
+  return false;
+};
+const attOwnedByLecturer = (v, lecturer) => {
+  if (!v || !lecturer) return false;
+  const gaji = String(lecturer.noGaji || '').trim();
+  if (!gaji) return false;
+  return String(v.lecturer_no_gaji || '').trim() === gaji;
+};
+
+// ============================================================
+// ICONS
+// ============================================================
+const IC = {};
+['ScanLine','LogOut','User','X','RefreshCw','CheckCircle2','XCircle','Loader2','Search','Clock','Wifi','WifiOff','Save','Plus','Calendar','Archive','Trash2','ChevronDown','MessageCircle','Send','Copy','Settings','Pencil','Download','FileText'].forEach(n => IC[n] = L[n]);
+
+const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-page';
+
+// ============================================================
+// LOGIN (No. Gaji)
+// ============================================================
+function LecturerLogin({ onLogin }) {
+  const [noGaji, setNoGaji] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = () => {
+    const no = noGaji.trim();
+    setError('');
+    if (!/^\d{6}$/.test(no)) { setError('Sila masukkan No. Gaji 6 digit.'); return; }
+    const name = LECTURER_MAP[no];
+    if (!name) { setError('No. Gaji tidak berdaftar.'); return; }
+    setBusy(true);
+    const lecturer = { noGaji: no, name };
+    saveCurrentLecturer(lecturer);
+    setTimeout(() => { onLogin(lecturer); setBusy(false); }, 300);
+  };
+
+  return html`
+    <div className="min-h-screen bg-navy flex flex-col items-center justify-center px-6 py-10" style=${{background:'linear-gradient(160deg,#12284F 0%,#0F2344 55%,#1D4ED8 130%)'}}>
+      <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-white mb-5">
+        <${IC.ScanLine} className="w-8 h-8" />
+      </div>
+      <h1 className="text-white text-2xl font-extrabold tracking-tight">ATTEND.SYS</h1>
+      <p className="text-blue-200/60 text-[13px] mt-1 mb-8">Sistem Kehadiran Digital KPMIM</p>
+      <div className="w-full max-w-[340px] bg-white rounded-2xl shadow-2xl p-6">
+        <h2 className="text-[15px] font-bold text-navy">Log Masuk Pensyarah</h2>
+        <p className="text-[12px] text-muted mt-0.5 mb-4">Masukkan No. Gaji untuk meneruskan.</p>
+        <label className="block text-[12px] font-semibold text-ink mb-1.5">No. Gaji</label>
+        <input
+          type="text" inputMode="numeric" maxLength="6" autoComplete="off"
+          value=${noGaji}
+          onInput=${e => {
+            e.target.value = e.target.value.replace(/\D/g,'').slice(0,6);
+            setNoGaji(e.target.value); setError('');
+          }}
+          onKeyDown=${e => { if (e.key === 'Enter') submit(); }}
+          placeholder="— — — — — —"
+          className=${'w-full h-[50px] px-4 rounded-xl border border-line bg-white text-center text-[18px] text-ink font-mono tracking-[0.35em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ' + (error ? 'border-danger' : '')}
+        />
+        ${error ? html`<p className="mt-2 text-[12px] font-medium text-danger">${error}</p>` : null}
+        <button onClick=${submit} disabled=${busy}
+          className="mt-4 w-full h-[50px] rounded-xl bg-primary text-white text-[15px] font-semibold hover:bg-primary-dark disabled:opacity-60 transition-colors no-tap">
+          ${busy ? 'Memproses…' : 'Masuk'}
+        </button>
+        <p className="mt-4 text-center text-[10px] text-muted">KPMIM · Sistem Kehadiran Digital</p>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// TOAST
+// ============================================================
+function Toast({ msg, type }) {
+  if (!msg) return null;
+  return html`
+    <div className=${'fixed bottom-5 left-1/2 -translate-x-1/2 z-[600] max-w-[90vw] rounded-xl px-4 py-2.5 text-[12px] font-medium text-white shadow-2xl ' + (type === 'err' ? 'bg-danger' : type === 'warn' ? 'bg-amber-500' : 'bg-ink/90')}>
+      ${msg}
+    </div>`;
+}
+
+// ============================================================
+// SCANNER MODAL (full-screen, minimal)
+// ============================================================
+function ScannerModal({ status, count, onManualId, onScanImage, onClose }) {
+  return html`
+    <div className="fixed inset-0 z-[500] bg-black flex flex-col items-center justify-center px-4" role="dialog" aria-modal="true" aria-label="Pengesan QR">
+      <div className="w-full max-w-[320px] flex flex-col items-center gap-3">
+        <div className="w-full bg-black rounded-2xl overflow-hidden border border-white/15 relative">
+          <div id="qr-reader" className="w-full min-h-[260px]"></div>
+          <div id="qr-img-reader" className="hidden"></div>
+        </div>
+        <div className="flex items-center gap-2 text-white/90 text-[13px] font-mono min-h-[1.4em] text-center">
+          ${status}
+        </div>
+        <div className="w-full bg-white/[0.07] border border-white/10 rounded-xl p-3 space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-200/60">Input Manual ID</div>
+          <div className="flex gap-2">
+            <input id="manual-id" placeholder="IDC24-03-001" onKeyDown=${e => { if (e.key === 'Enter') onManualId(e.target.value); }}
+              className="flex-1 h-[42px] px-3 rounded-lg bg-white/10 border border-white/15 text-white font-mono text-[13px] placeholder:text-blue-200/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" />
+            <button onClick=${e => onManualId(e.currentTarget.previousElementSibling.value)}
+              className="h-[42px] px-4 rounded-lg bg-primary text-white text-[13px] font-semibold no-tap">OK</button>
+          </div>
+          <label className="flex items-center justify-center gap-2 h-[42px] rounded-lg border border-dashed border-white/20 text-blue-100/70 text-[12px] font-medium cursor-pointer no-tap">
+            Scan dari Gambar
+            <input type="file" accept="image/*" style=${{display:'none'}} onChange=${e => onScanImage(e.target.files)} />
+          </label>
+        </div>
+        <button onClick=${onClose} className="h-[44px] px-6 rounded-xl bg-white/10 border border-white/20 text-white text-[14px] font-medium no-tap">
+          Tutup Scanner
+        </button>
+        <div className="text-white/60 text-[12px]">${count} pelajar hadir</div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// SESI MANAGER (bottom sheet)
+// ============================================================
+function SesiManagerMobile({ sessions, activeSessionId, attMap, onSetActive, onArchive, onDelete, onNew, onSetTime, onClose }) {
+  const [editId, setEditId] = useState(null);
+  const [eStart, setEStart] = useState('08:00');
+  const [eEnd, setEEnd] = useState('10:00');
+  const startEdit = (s) => { setEditId(s.id); setEStart(s.startTime || '08:00'); setEEnd(s.endTime || '10:00'); };
+  const saveEdit = (s) => { if (onSetTime) onSetTime(s.id, eStart, eEnd); setEditId(null); };
+  const fmtShort = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString('ms-MY', { day:'2-digit', month:'short', year:'numeric' }); } catch (e) { return d; } };
+  return html`
+    <div className="fixed inset-0 z-[500] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Sesi Kelas">
+      <div className="absolute inset-0 bg-navy/60" onClick=${onClose}></div>
+      <div className="relative w-full max-w-[480px] bg-page rounded-t-3xl max-h-[86vh] flex flex-col overflow-hidden">
+        <div className="px-4 py-4 bg-white border-b border-line shrink-0 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center text-primary shrink-0"><${IC.Archive} className="w-4 h-4" /></div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[15px] font-extrabold text-navy">Sesi Kelas</div>
+            <div className="text-[11px] text-muted mt-0.5">Urus sesi kehadiran kelas ini</div>
+          </div>
+          <button onClick=${onNew} className=${'inline-flex items-center gap-1 h-[38px] px-3.5 rounded-xl bg-primary text-white text-[12px] font-semibold no-tap ' + FOCUS}>
+            <${IC.Plus} className="w-4 h-4" /> Sesi Baru
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto scroll-thin p-3 space-y-2.5">
+          ${(sessions || []).length ? sessions.map(s => {
+            const map = s.id ? (attMap[s.id] || {}) : {};
+            const pres = Object.values(map).filter(a => a.status === 'present').length;
+            const abs = Object.values(map).filter(a => a.status === 'absent').length;
+            const isActive = s.id === activeSessionId;
+            const sName = s.date ? fmtShort(s.date) : (s.createdAt ? new Date(s.createdAt).toLocaleDateString('ms-MY', { day:'2-digit', month:'short' }) : 'Sesi');
+            return html`
+              <div key=${s.id} className=${'rounded-2xl bg-white border p-3.5 ' + (isActive ? 'border-primary/40 ring-2 ring-primary/10' : 'border-line')}>
+                ${editId === s.id ? html`
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] font-bold text-navy uppercase tracking-wide w-full mb-1">Edit masa · ${sName}</span>
+                    <input type="time" value=${eStart} onChange=${e => setEStart(e.target.value)} aria-label="Masa mula"
+                      className="h-[34px] px-2 rounded-lg border border-line bg-white text-[12px] font-mono text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
+                    <span className="text-muted">–</span>
+                    <input type="time" value=${eEnd} onChange=${e => setEEnd(e.target.value)} aria-label="Masa tamat"
+                      className="h-[34px] px-2 rounded-lg border border-line bg-white text-[12px] font-mono text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
+                    <div className="w-full flex gap-1.5 mt-1">
+                      <button onClick=${() => saveEdit(s)} className=${'inline-flex items-center justify-center h-[34px] px-3 rounded-lg bg-primary text-white text-[12px] font-semibold no-tap ' + FOCUS}><${IC.Clock} className="w-3.5 h-3.5 mr-1" /> Simpan</button>
+                      <button onClick=${() => setEditId(null)} className=${'inline-flex items-center justify-center h-[34px] px-3 rounded-lg bg-page border border-line text-muted text-[12px] font-semibold no-tap ' + FOCUS}>Batal</button>
+                    </div>
+                  </div>`
+                : html`
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-extrabold text-navy truncate">${sName}${s.startTime ? html` <span className="text-muted font-semibold text-[11.5px]">· ${s.startTime}–${s.endTime}</span>` : ''}</div>
+                      <div className="text-[11px] text-muted mt-0.5">${pres} hadir · ${abs} tidak hadir ${s.archived ? html`<span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold">ARKIB</span>` : isActive ? html`<span className="ml-1 px-1.5 py-0.5 rounded-full bg-success/10 text-success text-[9px] font-bold">AKTIF</span>` : ''}</div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      ${isActive ? html`<span className="inline-flex items-center h-[34px] px-2.5 rounded-lg bg-success/10 text-success text-[10.5px] font-bold">&nbsp;✓&nbsp;Aktif</span>`
+                        : html`<button onClick=${() => onSetActive(s.id)} className=${'inline-flex items-center h-[34px] px-2.5 rounded-lg bg-primary text-white text-[10.5px] font-bold no-tap ' + FOCUS}>&nbsp;▶&nbsp;Aktif</button>`}
+                      <button onClick=${() => startEdit(s)} title="Edit masa" className=${'inline-flex items-center justify-center h-[34px] w-[34px] rounded-lg bg-white border border-line text-muted no-tap ' + FOCUS}><${IC.Clock} className="w-4 h-4" /></button>
+                      <button onClick=${() => onArchive(s.id)} title=${s.archived ? 'Buka arkib' : 'Arkib'} className=${'inline-flex items-center justify-center h-[34px] w-[34px] rounded-lg bg-white border border-line text-muted no-tap ' + FOCUS}><${IC.Archive} className="w-4 h-4" /></button>
+                      <button onClick=${() => onDelete(s)} title="Padam" className=${'inline-flex items-center justify-center h-[34px] w-[34px] rounded-lg bg-danger/10 border border-danger/20 text-danger no-tap ' + FOCUS}><${IC.Trash2} className="w-4 h-4" /></button>
+                    </div>
+                  </div>`}
+              </div>`;
+          }) : html`<div className="py-10 text-center text-[12px] text-muted">Belum ada sesi. Tekan "Sesi Baru" untuk mula.</div>`}
+        </div>
+        <div className="p-3 bg-white border-t border-line shrink-0">
+          <button onClick=${onClose} className=${'w-full h-[46px] rounded-xl bg-navy text-white text-[14px] font-semibold no-tap ' + FOCUS}>Tutup</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// SESI BARU
+// ============================================================
+function NewSessionModalMobile({ draft, onClose, onCreate }) {
+  const [date, setDate] = useState((draft && draft.date) || new Date().toISOString().slice(0, 10));
+  const [start, setStart] = useState((draft && draft.startTime) || '08:00');
+  const [end, setEnd] = useState((draft && draft.endTime) || '10:00');
+  const [err, setErr] = useState(null);
+  const dur = durationH(start, end);
+  const submit = () => {
+    if (!date) return setErr('Tarikh diperlukan.');
+    if (dur <= 0) return setErr('Masa tamat mesti selepas masa mula.');
+    onCreate({ date, startTime: start, endTime: end });
+  };
+  const field = 'mt-1 w-full h-[44px] px-3 rounded-xl border border-line bg-white text-[14px] text-ink placeholder:text-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30';
+  const lbl = 'block text-[12px] font-semibold text-ink';
+  return html`
+    <div className="fixed inset-0 z-[500] flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Sesi Baharu">
+      <div className="absolute inset-0 bg-navy/60" onClick=${onClose}></div>
+      <div className="relative w-full max-w-[460px] bg-white rounded-t-3xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-line flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center text-primary"><${IC.Calendar} className="w-4 h-4" /></div>
+          <div>
+            <div className="text-[15px] font-extrabold text-navy">Sesi Baru</div>
+            <div className="text-[11px] text-muted mt-0.5">Tambah sesi kehadiran kelas ini</div>
+          </div>
+          <button onClick=${onClose} aria-label="Tutup" className=${'ml-auto w-9 h-9 rounded-lg flex items-center justify-center text-muted no-tap ' + FOCUS}><${IC.X} className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 space-y-3.5">
+          <div>
+            <label className=${lbl}>Tarikh Kelas</label>
+            <input type="date" value=${date} onChange=${e => setDate(e.target.value)} className=${field} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className=${lbl}>Masa Mula</label><input type="time" value=${start} onChange=${e => setStart(e.target.value)} className=${field} /></div>
+            <div><label className=${lbl}>Masa Tamat</label><input type="time" value=${end} onChange=${e => setEnd(e.target.value)} className=${field} /></div>
+          </div>
+          <div className="flex items-center gap-2 text-[12px] text-muted">
+            <span>Tempoh:</span>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-bold">${durBadge(start, end)}</span>
+          </div>
+          ${err ? html`<p className="text-[12px] font-medium text-danger">${err}</p>` : null}
+        </div>
+        <div className="flex gap-2 px-5 py-4 border-t border-line bg-page/60">
+          <button onClick=${onClose} className=${'flex-1 h-[46px] rounded-xl bg-white border border-line text-[14px] font-semibold text-ink no-tap ' + FOCUS}>Batal</button>
+          <button onClick=${submit} className=${'flex-1 h-[46px] rounded-xl bg-primary text-white text-[14px] font-semibold no-tap ' + FOCUS}>Cipta Sesi</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// SIMPAN SESI
+// ============================================================
+function SaveSessionModalMobile({ info, onConfirm, onClose, saving }) {
+  if (!info) return null;
+  return html`
+    <div className="fixed inset-0 z-[500] bg-navy/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Simpan sesi">
+      <div className="w-full max-w-[400px] bg-white rounded-3xl overflow-hidden">
+        <div className="px-5 pt-6 pb-4 text-center border-b border-line">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mx-auto"><${IC.Save} className="w-5 h-5 text-primary" /></div>
+          <h3 className="mt-3 text-[16px] font-extrabold text-navy">Simpan Sesi Kehadiran?</h3>
+          <p className="mt-1 text-[12px] text-muted leading-relaxed">${info.summary}</p>
+        </div>
+        <div className="p-4">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-2xl bg-success/5 border border-success/20 py-3">
+              <div className="text-[24px] font-extrabold text-success font-mono leading-none">${info.present}</div>
+              <div className="text-[10px] text-muted uppercase tracking-wide mt-1">Hadir</div>
+            </div>
+            <div className="rounded-2xl bg-danger/5 border border-danger/20 py-3">
+              <div className="text-[24px] font-extrabold text-danger font-mono leading-none">${info.absent}</div>
+              <div className="text-[10px] text-muted uppercase tracking-wide mt-1">Tidak Hadir</div>
+            </div>
+            <div className="rounded-2xl bg-page border border-line py-3">
+              <div className="text-[24px] font-extrabold text-muted font-mono leading-none">${info.none}</div>
+              <div className="text-[10px] text-muted uppercase tracking-wide mt-1">Tiada Rekod</div>
+            </div>
+          </div>
+          ${info.writeNote ? html`<p className="mt-3 text-[11.5px] leading-relaxed text-center text-success bg-success/5 border border-success/20 rounded-xl px-3 py-2 whitespace-pre-wrap">${info.writeNote}</p>` : null}
+        </div>
+        <div className="flex gap-2 px-4 py-4 border-t border-line bg-page/60">
+          <button onClick=${onClose} disabled=${saving} className=${'flex-1 h-[44px] rounded-xl bg-white border border-line text-[13px] font-semibold text-ink disabled:opacity-60 no-tap ' + FOCUS}>Batal</button>
+          <button onClick=${onConfirm} disabled=${saving} className=${'flex-1 h-[44px] rounded-xl bg-primary text-white text-[13px] font-bold disabled:opacity-60 no-tap ' + FOCUS}>
+            ${saving ? html`<${IC.Loader2} className="w-4 h-4 animate-spin mx-auto" />` : 'Ya, Simpan Sekarang'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// APP
+// ============================================================
+function App() {
+  const [currentLecturer, setCurrentLecturer] = useState(getCurrentLecturer());
+  const [classes, setClasses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [activeClassId, setActiveClassId] = useState(null);
+  const [sessionsMap, setSessionsMap] = useState({});
+  const [selSessionMap, setSelSessionMap] = useState({});
+  const [attMap, setAttMap] = useState({});
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanStatus, setScanStatus] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [toastMsg, setToastMsg] = useState(null);
+  const [stampKey, setStampKey] = useState(0);
+  const [stampOn, setStampOn] = useState(false);
+  const [live, setLive] = useState(false);
+  const [sesiMgrOpen, setSesiMgrOpen] = useState(false);
+  const [newSeshOpen, setNewSeshOpen] = useState(false);
+  const [newSeshDraft, setNewSeshDraft] = useState(null);
+  const [saveModal, setSaveModal] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [viewTab, setViewTab] = useState('all');
+  const [rsSearch, setRsSearch] = useState('');
+
+  const qrCodeRef = useRef(null);
+  const stampTimer = useRef(null);
+  const toastTimer = useRef(null);
+  const lecturerRef = useRef(currentLecturer);
+  const studentFilterRef = useRef([]);
+  const scanHandlerRef = useRef(null);
+  const lastDecodeRef = useRef({ text: '', t: 0 });
+  const beepCtxRef = useRef(null);
+  const beepUnlockedRef = useRef(false);
+
+  const toast = (msg, type) => {
+    setToastMsg(msg); clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(null), 2500);
+  };
+
+  useEffect(() => { lecturerRef.current = currentLecturer; }, [currentLecturer]);
+  useEffect(() => { studentFilterRef.current = students; }, [students]);
+
+  const filterClassesForLecturer = useCallback((arr) => {
+    const lect = lecturerRef.current;
+    const sts = studentFilterRef.current || [];
+    if (!lect || !lect.name) return [];
+    const lname = String(lect.name).trim().toUpperCase();
+    return (arr || []).filter(cls => {
+      if (sts.some(s => stuInClass(cls, s))) return true;
+      const cl = String(cls.lecturer || '').trim().toUpperCase();
+      return !!cl && cl === lname;
+    });
+  }, []);
+
+  const loadClasses = useCallback(async () => {
+    try {
+      const snap = await withTimeout(getDocs(collection(db, 'classes')), 15000, 'Muat kelas');
+      const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const filtered = filterClassesForLecturer(arr);
+      setClasses(filtered);
+      if (filtered.length) setActiveClassId(cur => (cur && filtered.find(c => c.id === cur) ? cur : filtered[0].id));
+      else setActiveClassId(null);
+    } catch (e) { console.error('Gagal load classes', e); }
+  }, [filterClassesForLecturer]);
+
+  const autoCreateClasses = useCallback(async (students, lecturerName) => {
+    try {
+      const names = [...new Set((students || []).map(s => (s.kelas || '').trim()).filter(Boolean))];
+      if (!names.length) return;
+      const snap = await getDocs(collection(db, 'classes'));
+      const existing = new Set(snap.docs.map(d => d.id));
+      const existingNames = new Set(snap.docs.map(d => normKlas(d.data().className || '')));
+      let created = 0;
+      for (const n of names) {
+        const parts = n.split(/[-–—]|\s+/).map(x => x.trim()).filter(Boolean);
+        const first = (parts[0] || '').toUpperCase();
+        let code = '';
+        if (/^[A-Z]{2,4}\d{3,4}$/.test(first)) code = first;
+        else if (/^[A-Z]{2,4}$/.test(first)) {
+          const sem = (students.find(s => (s.kelas || '').trim().toUpperCase() === n)?.semester || '').toString().trim();
+          code = first + sem;
+        }
+        if (!code) continue;
+        const className = n;
+        const id = slug(`${code}_${className}_Isnin`);
+        if (existing.has(id)) continue;
+        if (existingNames.has(normKlas(className))) continue;
+        const subjName = (students.filter(s => (s.kelas || '').trim() === n).map(s => s.subjek).find(Boolean)) || '';
+        await setDoc(doc(db, 'classes', id), { code, subjName, className, lecturer: lecturerName || '', day: 'Isnin', startTime: '08:00', endTime: '10:00', durationHours: 2, room: '' });
+        created++;
+      }
+      if (created) await loadClasses();
+    } catch (e) { console.error('Gagal auto-cipta kelas', e); }
+  }, [loadClasses]);
+
+  const loadStudents = useCallback(async () => {
+    const lect = currentLecturer;
+    const lname = lect && lect.name ? String(lect.name).trim().toUpperCase() : '';
+    if (!lname) return;
+    try {
+      const url = SUPABASE_URL + '/rest/v1/students?select=*&order=no_matrik.asc';
+      const res = await fetch(url, { headers: { 'apikey': SUPABASE_PUBLISHABLE_KEY, 'Authorization': 'Bearer ' + SUPABASE_PUBLISHABLE_KEY } });
+      if (!res.ok) throw new Error('Supabase HTTP ' + res.status);
+      const data = await res.json();
+      const all = (Array.isArray(data) ? data : []).map(normalizeStudent).filter(Boolean);
+      const mine = all.filter(s => String(s.source_name || '').trim().toUpperCase() === lname);
+      studentFilterRef.current = mine;
+      setStudents(mine);
+      await autoCreateClasses(mine, lect.name);
+      await loadClasses();
+    } catch (e) {
+      console.error('Gagal load students:', e);
+      setStudents([]);
+      studentFilterRef.current = [];
+      await loadClasses();
+    }
+  }, [currentLecturer, autoCreateClasses, loadClasses]);
+
+  const handleLogout = () => {
+    clearCurrentLecturer();
+    studentFilterRef.current = [];
+    setCurrentLecturer(null);
+    setStudents([]); setClasses([]); setActiveClassId(null);
+    setSessionsMap({}); setSelSessionMap({}); setAttMap({});
+  };
+
+  const handleLogin = (lecturer) => {
+    setStudents([]); setClasses([]); setActiveClassId(null);
+    setSessionsMap({}); setSelSessionMap({}); setAttMap({});
+    studentFilterRef.current = [];
+    setCurrentLecturer(lecturer);
+  };
+
+  useEffect(() => {
+    if (!currentLecturer) return;
+    setLoaded(false);
+    loadStudents().then(() => setLoaded(true));
+  }, [currentLecturer, loadStudents]);
+
+  // ---- Realtime: classes ----
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'classes'), snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const filtered = filterClassesForLecturer(arr);
+      setClasses(filtered);
+      if (filtered.length) setActiveClassId(cur => (cur && filtered.find(c => c.id === cur) ? cur : filtered[0].id));
+      else setActiveClassId(null);
+    }, err => console.error('Gagal muat kelas (realtime)', err));
+    return () => unsub();
+  }, [filterClassesForLecturer]);
+
+  // ---- Realtime: sessions utk kelas aktif ----
+  useEffect(() => {
+    if (!activeClassId) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'sessions'), where('classId', '==', activeClassId), orderBy('createdAt', 'desc'), limit(100)),
+      snap => {
+        const arr = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => attOwnedByLecturer(s, lecturerRef.current));
+        setSessionsMap(m => ({ ...m, [activeClassId]: arr }));
+        const active = arr.find(s => !s.archived) || arr[0];
+        setSelSessionMap(m => (m[activeClassId] && arr.find(s => s.id === m[activeClassId]) ? m : { ...m, [activeClassId]: active ? active.id : null }));
+      },
+      err => console.error('Gagal muat sesi (realtime)', err)
+    );
+    return () => unsub();
+  }, [activeClassId]);
+
+  // ---- Auto-cipta sesi hari ini (doc id SAMA dgn index.html) ----
+  useEffect(() => {
+    if (!activeClassId) return;
+    const cls = classes.find(c => c.id === activeClassId);
+    if (!cls) return;
+    const list = sessionsMap[activeClassId] || [];
+    const today = new Date().toISOString().slice(0, 10);
+    if (list.some(s => !s.archived && s.date === today)) return;
+    let alive = true;
+    (async () => {
+      try {
+        const startTime = nowHHMM();
+        const endTime = addHours(startTime, cls.durationHours || 2);
+        const id = slug(activeClassId + '-' + today);
+        await setDoc(doc(db, 'sessions', id), {
+          classId: activeClassId, className: classLabel(cls), date: today,
+          startTime, endTime, createdAt: serverTimestamp(), archived: false, auto: true,
+          lecturer_no_gaji: (lecturerRef.current && lecturerRef.current.noGaji) || '',
+          lecturer_name: (lecturerRef.current && lecturerRef.current.name) || ''
+        });
+        if (!alive) return;
+        setSessionsMap(m => ({ ...m, [activeClassId]: [{ id, classId: activeClassId, className: classLabel(cls), date: today, startTime, endTime, archived: false, createdAt: new Date(), auto: true, lecturer_no_gaji: (lecturerRef.current && lecturerRef.current.noGaji) || '', lecturer_name: (lecturerRef.current && lecturerRef.current.name) || '' }, ...(m[activeClassId] || [])] }));
+        setSelSessionMap(m => ({ ...m, [activeClassId]: id }));
+      } catch (e) { console.error('Gagal auto-cipta sesi', e); }
+    })();
+    return () => { alive = false; };
+  }, [activeClassId, classes, sessionsMap]);
+
+  // ---- Realtime: attendance utk sesi aktif ----
+  useEffect(() => {
+    const sessionId = selSessionMap[activeClassId];
+    if (!activeClassId || !sessionId) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'attendance'), where('sessionId', '==', sessionId)),
+      snap => {
+        const m = {};
+        snap.docs.forEach(d => {
+          const v = d.data();
+          if (!v || !v.studentId) return;
+          if (!attOwnedByLecturer(v, lecturerRef.current)) return;
+          m[v.studentId] = { status: v.status || 'present', time: v.time || '' };
+        });
+        setAttMap(p => ({ ...p, [sessionId]: m }));
+        setLive(true);
+      }
+    );
+    return () => unsub();
+  }, [activeClassId, selSessionMap, currentLecturer]);
+
+  // ---- Scanner ----
+  const getStudentById = sid => students.find(s => studentIdOf(s) === sid);
+
+  const matchStudent = (sid, list) => {
+    const q = String(sid || '').trim().toUpperCase();
+    if (!q) return null;
+    const qn = q.replace(/[^A-Z0-9]/g, '');
+    const norm = s => String(s.id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    let hit = list.find(s => String(s.id || '').toUpperCase() === q);
+    if (hit) return hit;
+    hit = list.find(s => norm(s) === qn);
+    if (hit) return hit;
+    return list.find(s => norm(s).includes(qn) || qn.includes(norm(s)));
+  };
+
+  const doMark = useCallback(async (sid, status) => {
+    const classId = activeClassId;
+    const sessionId = selSessionMap[classId];
+    if (!classId || !sessionId) return { ok: false, msg: 'Tiada sesi aktif' };
+    sid = String(sid).trim();
+    const cls = classes.find(c => c.id === classId);
+    const student = getStudentById(sid);
+    const docId = sessionId + '_' + sid;
+    try {
+      const time = fmtClock(new Date());
+      const lect = lecturerRef.current;
+      await setDoc(doc(db, 'attendance', docId), {
+        sessionId, classId, className: (cls && classLabel(cls)) || '', studentId: sid,
+        studentName: student ? studentNameOf(student) : 'Tidak diketahui',
+        status, time, timestamp: serverTimestamp(),
+        lecturer_no_gaji: (lect && lect.noGaji) || '',
+        lecturer_name: (lect && lect.name) || ''
+      });
+      return { ok: true, student };
+    } catch (e) { return { ok: false, msg: e.message }; }
+  }, [activeClassId, selSessionMap, classes, students]);
+
+  const handleScanText = useCallback(async (text) => {
+    const sid = String(text || '').trim();
+    if (!sid) { setScanStatus('QR kosong — cuba lagi'); return; }
+    const student = getStudentById(sid) || matchStudent(sid, students);
+    const sessionId = selSessionMap[activeClassId];
+    const cur = sessionId ? (attMap[sessionId] || {})[sid] : null;
+    if (!student) {
+      setScanStatus('✗ ID tidak dijumpai: ' + sid);
+      playBeep(false);
+      return;
+    }
+    if (cur && cur.status === 'present') {
+      setScanStatus('✓ ' + (student.nickname || studentNameOf(student).split(' ')[0]) + ' sudah hadir');
+      return;
+    }
+    const r = await doMark(student.id, 'present');
+    if (r && r.ok) {
+      setScanStatus('✓ ' + (student.nickname || studentNameOf(student).split(' ')[0]) + ' ditanda hadir');
+      playBeep(true);
+      toast('✓ ' + (student.nickname || studentNameOf(student).split(' ')[0]) + ' ditanda hadir', 'ok');
+      setStampKey(k => k + 1); setStampOn(true);
+      clearTimeout(stampTimer.current);
+      stampTimer.current = setTimeout(() => setStampOn(false), 1100);
+    } else {
+      setScanStatus('Gagal: ' + ((r && r.msg) || 'ralat'));
+      playBeep(false);
+    }
+  }, [activeClassId, selSessionMap, students, attMap, doMark]);
+
+  useEffect(() => { scanHandlerRef.current = handleScanText; }, [handleScanText]);
+
+  // ---- Bunyi beep (Web Audio, tanpa fail luaran) ----
+  const ensureAudio = () => {
+    try {
+      if (!beepCtxRef.current) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        beepCtxRef.current = new AC();
+      }
+      if (beepCtxRef.current.state === 'suspended') beepCtxRef.current.resume();
+      return beepCtxRef.current;
+    } catch (e) { return null; }
+  };
+  const playBeep = (ok) => {
+    try {
+      const ctx = ensureAudio();
+      if (!ctx) return;
+      const t0 = ctx.currentTime;
+      const mk = (freq, start, dur, type) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = type; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t0 + start);
+        g.gain.exponentialRampToValueAtTime(0.35, t0 + start + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + start + dur);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(t0 + start); o.stop(t0 + start + dur + 0.02);
+      };
+      if (ok) { mk(880, 0, 0.16, 'sine'); mk(1318.5, 0.14, 0.24, 'sine'); }
+      else { mk(196, 0, 0.28, 'square'); }
+    } catch (e) {}
+  };
+  useEffect(() => {
+    if (beepUnlockedRef.current) return;
+    const unlock = () => { beepUnlockedRef.current = true; ensureAudio(); };
+    document.addEventListener('pointerdown', unlock, { once: true });
+    document.addEventListener('touchstart', unlock, { once: true });
+    return () => { document.removeEventListener('pointerdown', unlock); document.removeEventListener('touchstart', unlock); };
+  }, []);
+
+  const handleScanImage = async (files) => {
+    if (!files || !files[0]) return;
+    setScanStatus('Memproses gambar...');
+    const qr = new Html5Qrcode('qr-img-reader');
+    try {
+      const text = await qr.scanFile(files[0], false);
+      await handleScanText(text);
+    } catch (e) { setScanStatus('QR tidak berjaya dibaca'); }
+    finally { try { qr.clear(); } catch (e) {} }
+  };
+
+  const startScanner = useCallback(async () => {
+    if (qrCodeRef.current) { try { await qrCodeRef.current.stop(); } catch (e) {} try { qrCodeRef.current.clear(); } catch (e) {} qrCodeRef.current = null; }
+    if (!document.getElementById('qr-reader')) return;
+    lastDecodeRef.current = { text: '', t: 0 };
+    const qr = new Html5Qrcode('qr-reader');
+    qrCodeRef.current = qr;
+    setScanStatus('Arahkan QR pada kad pelajar ke kamera');
+    try {
+      await qr.start({ facingMode: 'environment' }, { fps: 8, qrbox: 240 },
+        text => {
+          const now = Date.now();
+          const prev = lastDecodeRef.current;
+          if (prev.text === text && now - prev.t < 1500) return;
+          lastDecodeRef.current = { text, t: now };
+          try { if (qr.getState() === 2) qr.pause(); } catch (e) {}
+          const fn = scanHandlerRef.current;
+          if (fn) fn(text).catch(() => {}).finally(() => setTimeout(() => {
+            try { if (qr.getState() === 3) qr.resume(); } catch (e) {}
+          }, 350));
+        },
+        () => {}
+      );
+    } catch (err) {
+      qrCodeRef.current = null;
+      setScanStatus('Gagal buka kamera: ' + err);
+    }
+  }, []);
+
+  const stopScanner = useCallback(async () => {
+    const q = qrCodeRef.current;
+    qrCodeRef.current = null;
+    if (!q) return;
+    try { await q.stop(); } catch (e) {}
+    try { q.clear(); } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+    startScanner();
+    return () => { stopScanner(); };
+  }, [scannerOpen, startScanner, stopScanner]);
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+    const onVis = () => {
+      if (document.hidden) stopScanner();
+      else setTimeout(startScanner, 150);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [scannerOpen, startScanner, stopScanner]);
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+    const t = setInterval(() => {
+      const q = qrCodeRef.current;
+      if (!q) return;
+      try {
+        const s = q.getState();
+        const idle = Date.now() - lastDecodeRef.current.t;
+        if (s !== 2 || idle > 10000) { setScanStatus('Kamera terhenti — dimulakan semula…'); startScanner(); }
+      } catch (e) {}
+    }, 4000);
+    return () => clearInterval(t);
+  }, [scannerOpen, startScanner]);
+
+  // ---- Urus sesi & simpan kehadiran ----
+  const openNewSession = () => {
+    if (!activeClassId) return;
+    const c = classes.find(x => x.id === activeClassId);
+    setNewSeshDraft({ date: new Date().toISOString().slice(0, 10), startTime: (c && c.startTime) || '08:00', endTime: (c && c.endTime) || '10:00' });
+    setNewSeshOpen(true);
+    setSesiMgrOpen(false);
+  };
+
+  const onNewSession = async (draft) => {
+    if (!activeClassId) return;
+    const cls = classes.find(c => c.id === activeClassId);
+    const date = (draft && draft.date) || new Date().toISOString().slice(0, 10);
+    const startTime = (draft && draft.startTime) || (cls && cls.startTime) || '08:00';
+    const endTime = (draft && draft.endTime) || (cls && cls.endTime) || '10:00';
+    const lect = lecturerRef.current;
+    try {
+      const ref = await addDoc(collection(db, 'sessions'), {
+        classId: activeClassId, className: cls ? classLabel(cls) : '', date, startTime, endTime,
+        createdAt: serverTimestamp(), archived: false,
+        lecturer_no_gaji: (lect && lect.noGaji) || '',
+        lecturer_name: (lect && lect.name) || ''
+      });
+      setSessionsMap(m => ({ ...m, [activeClassId]: [{ id: ref.id, classId: activeClassId, className: cls ? classLabel(cls) : '', date, startTime, endTime, archived: false, createdAt: new Date(), lecturer_no_gaji: (lect && lect.noGaji) || '', lecturer_name: (lect && lect.name) || '' }, ...(m[activeClassId] || [])] }));
+      setSelSessionMap(m => ({ ...m, [activeClassId]: ref.id }));
+      setNewSeshOpen(false);
+      toast('Sesi baru dicipta', 'ok');
+    } catch (e) { toast('Gagal cipta sesi: ' + e.message, 'err'); }
+  };
+
+  const setActiveSesi = (sessionId) => {
+    setSelSessionMap(m => ({ ...m, [activeClassId]: sessionId }));
+    setSesiMgrOpen(false);
+  };
+
+  const setSessionTime = async (sessionId, startTime, endTime) => {
+    const arr = sessionsMap[activeClassId] || [];
+    const s = arr.find(x => x.id === sessionId);
+    if (!s) return;
+    try {
+      await setDoc(doc(db, 'sessions', sessionId), { startTime: startTime || '08:00', endTime: endTime || '10:00' }, { merge: true });
+      setSessionsMap(m => ({ ...m, [activeClassId]: arr.map(x => x.id === sessionId ? { ...x, startTime: startTime || '08:00', endTime: endTime || '10:00' } : x) }));
+      toast('Masa sesi dikemas kini', 'ok');
+    } catch (e) { toast('Gagal set masa: ' + e.message, 'err'); }
+  };
+
+  const toggleArchive = async (sessionId) => {
+    const arr = sessionsMap[activeClassId] || [];
+    const s = arr.find(x => x.id === sessionId);
+    if (!s) return;
+    const next = !s.archived;
+    try {
+      await setDoc(doc(db, 'sessions', sessionId), { archived: next }, { merge: true });
+      setSessionsMap(m => ({ ...m, [activeClassId]: arr.map(x => x.id === sessionId ? { ...x, archived: next } : x) }));
+      if (next && selSessionMap[activeClassId] === sessionId) {
+        const others = arr.filter(x => x.id !== sessionId && !x.archived);
+        setSelSessionMap(m => ({ ...m, [activeClassId]: others[0] ? others[0].id : null }));
+      }
+      toast(next ? 'Sesi diarkibkan' : 'Sesi dibuka dari arkib', 'ok');
+    } catch (e) { toast('Gagal arkib: ' + e.message, 'err'); }
+  };
+
+  const deleteSesi = async (s) => {
+    try {
+      const q = query(collection(db, 'attendance'), where('sessionId', '==', s.id));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+      await deleteDoc(doc(db, 'sessions', s.id));
+      const arr = (sessionsMap[activeClassId] || []).filter(x => x.id !== s.id);
+      setSessionsMap(m => ({ ...m, [activeClassId]: arr }));
+      if (selSessionMap[activeClassId] === s.id) setSelSessionMap(m => ({ ...m, [activeClassId]: arr[0] ? arr[0].id : null }));
+      setSesiMgrOpen(false);
+      toast('Sesi dipadam', 'ok');
+    } catch (e) { toast('Gagal padam sesi: ' + e.message, 'err'); }
+  };
+
+  const toggleRoster = async (s) => {
+    if (!sessionId) { toast('Tiada sesi aktif', 'warn'); return; }
+    const cur = (att[studentIdOf(s)] || {}).status;
+    const next = cur === 'present' ? 'absent' : 'present';
+    const r = await doMark(studentIdOf(s), next);
+    if (r && r.ok) {
+      if (next === 'present') { playBeep(true); toast('✓ ' + (s.nickname || studentNameOf(s).split(' ')[0]) + ' ditanda hadir', 'ok'); }
+      else toast('✗ ' + (s.nickname || studentNameOf(s).split(' ')[0]) + ' ditanda tidak hadir', 'warn');
+    } else if (r && r.msg) toast(r.msg, 'err');
+  };
+
+  const openSaveModal = () => {
+    const classId = activeClassId, sessionId = selSessionMap[classId];
+    if (!sessionId) { toast('Tiada sesi aktif untuk disimpan', 'warn'); return; }
+    const cls = classes.find(c => c.id === classId);
+    const session = (sessionsMap[classId] || []).find(s => s.id === sessionId);
+    const date = (session && session.date) || new Date().toISOString().slice(0, 10);
+    const st = (session && session.startTime) || (cls && cls.startTime) || '08:00';
+    const en = (session && session.endTime) || (cls && cls.endTime) || '10:00';
+    const map = attMap[sessionId] || {};
+    const list = students.filter(s => stuInClass(cls, s));
+    const total = list.length;
+    const present = list.filter(s => (map[studentIdOf(s)] || {}).status === 'present').length;
+    const absent = list.filter(s => (map[studentIdOf(s)] || {}).status === 'absent').length;
+    const none = total - present - absent;
+    const summary = classLabel(cls) + ' · ' + new Date(date + 'T00:00:00').toLocaleDateString('ms-MY', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) + ' · ' + st + '–' + en + ' (' + durBadge(st, en) + ')';
+    setSaveModal({
+      summary, present, absent, none,
+      writeNote: (getScriptUrl().startsWith('PASTE') ? '⚠ URL Apps Script belum set — rekod akan disimpan tempatan sahaja.\n' : '● Rekod akan dihantar ke sheet (REKOD KEHADIRAN).\n') + (none > 0 ? '● ' + none + ' pelajar belum ditandai — akan dikira TIDAK HADIR automatik.' : '')
+    });
+  };
+
+  const confirmSaveSession = async () => {
+    const classId = activeClassId, sessionId = selSessionMap[classId];
+    if (!sessionId || saving) return;
+    setSaving(true);
+    const cls = classes.find(c => c.id === classId);
+    const session = (sessionsMap[classId] || []).find(s => s.id === sessionId);
+    const date = (session && session.date) || new Date().toISOString().slice(0, 10);
+    const map = attMap[sessionId] || {};
+    const list = students.filter(s => stuInClass(cls, s));
+    const lect = lecturerRef.current;
+    const lectNoGaji = (lect && lect.noGaji) || '';
+    const lectName = (lect && lect.name) || '';
+    const st = (session && session.startTime) || (cls && cls.startTime) || '08:00';
+    const en = (session && session.endTime) || (cls && cls.endTime) || '10:00';
+    const records = list.map(s => {
+      const att0 = map[studentIdOf(s)];
+      const status = att0 && att0.status === 'present' ? 'HADIR' : 'TIDAK HADIR';
+      return { date: new Date(date + 'T00:00:00').toLocaleDateString('ms-MY', { day:'numeric', month:'long', year:'numeric' }), class: classLabel(cls), id: studentIdOf(s), name: studentNameOf(s), status, time: att0 ? att0.time || '—' : '—', lecturer_no_gaji: lectNoGaji, lecturer_name: lectName };
+    });
+    const present = records.filter(r => r.status === 'HADIR').length;
+    const absent = records.filter(r => r.status !== 'HADIR').length;
+    const snap = {
+      id: sessionId, date, tS: st, tE: en, dur: durBadge(st, en), className: classLabel(cls),
+      lecturer: (cls && cls.lecturer) || '', total: list.length, present, absent,
+      detail: records, savedAt: new Date().toISOString(),
+      lecturer_no_gaji: lectNoGaji, lecturer_name: lectName
+    };
+    let totalSaved = 0, hadError = false, lastErr = '';
+    const url = getScriptUrl();
+    if (!url.startsWith('PASTE')) {
+      const chunkSize = 20;
+      const chunks = [];
+      for (let i = 0; i < records.length; i += chunkSize) chunks.push(records.slice(i, i + chunkSize));
+      const sendChunk = (chunk, isLast, row) => {
+        const q = '?action=savebulk&records=' + encodeURIComponent(JSON.stringify(chunk)) + '&sesi=' + encodeURIComponent(classLabel(cls)) + '&gaji=' + encodeURIComponent(lectNoGaji) + '&pensyarah=' + encodeURIComponent(lectName) + '&sheet=' + encodeURIComponent(getRekodUrl()) + '&gid=' + encodeURIComponent(getRekodGid()) + '&last=' + (isLast ? '1' : '0') + (row ? '&row=' + row : '');
+        return fetch(url + q).then(res => res.json().catch(() => ({ success: false, error: 'Balasan tidak sah' }))).catch(e => ({ success: false, error: e.message }));
+      };
+      if (chunks.length <= 1) {
+        const d = await sendChunk(chunks[0], true, 0);
+        if (d.success) totalSaved += d.saved; else { hadError = true; lastErr = d.error || 'unknown'; }
+      } else {
+        let startRow = 0;
+        try {
+          const pr = await fetch(url + '?action=getLastRow&sheet=' + encodeURIComponent(getRekodUrl()) + '&gid=' + encodeURIComponent(getRekodGid())).then(r => r.json());
+          startRow = (Number(pr && pr.lastRow) || 1) + 1;
+        } catch (e) {}
+        if (startRow) {
+          const results = await Promise.all(chunks.map((c, i) => sendChunk(c, i === chunks.length - 1, startRow + i * chunkSize)));
+          results.forEach(d => { if (d.success) totalSaved += d.saved; else { hadError = true; lastErr = d.error || 'unknown'; } });
+        } else {
+          for (let i = 0; i < chunks.length; i++) {
+            const d = await sendChunk(chunks[i], i === chunks.length - 1, 0);
+            if (d.success) totalSaved += d.saved; else { hadError = true; lastErr = d.error || 'unknown'; }
+          }
+        }
+      }
+    }
+    const arr = readLS(LS_SAVED, []);
+    writeLS(LS_SAVED, [snap, ...arr]);
+    try {
+      const q = query(collection(db, 'attendance'), where('sessionId', '==', sessionId));
+      const s2 = await getDocs(q);
+      await Promise.all(s2.docs.map(d => deleteDoc(d.ref)));
+    } catch (e) {}
+    setSaveModal(null);
+    setSaving(false);
+    if (url.startsWith('PASTE')) toast('✓ Rekod disimpan tempatan (URL Apps Script belum set) & kehadiran diset semula', 'ok');
+    else if (totalSaved > 0 && !hadError) toast('✓ ' + totalSaved + ' rekod berjaya disimpan ke sheet!', 'ok');
+    else if (totalSaved > 0) toast('⚠ ' + totalSaved + '/' + records.length + ' rekod disimpan', 'warn');
+    else toast('Gagal hantar ke Sheets: ' + lastErr, 'err');
+  };
+
+  // ---- Derived ----
+  const cls = classes.find(c => c.id === activeClassId);
+  const sessionId = selSessionMap[activeClassId];
+  const session = sessionId ? (sessionsMap[activeClassId] || []).find(s => s.id === sessionId) : null;
+  const att = sessionId ? (attMap[sessionId] || {}) : {};
+  const clsStudents = cls ? students.filter(s => stuInClass(cls, s)) : [];
+  const pres = clsStudents.filter(s => (att[studentIdOf(s)] || {}).status === 'present');
+  const tS = (session && session.startTime) || (cls && cls.startTime) || '08:00';
+  const tE = (session && session.endTime) || (cls && cls.endTime) || '10:00';
+  const sdate = (session && session.date) || new Date().toISOString().slice(0, 10);
+  const rosterAll = clsStudents;
+  const rosterPresent = clsStudents.filter(s => (att[studentIdOf(s)] || {}).status === 'present');
+  const rosterAbsent = clsStudents.filter(s => (att[studentIdOf(s)] || {}).status === 'absent');
+  const rosterList = viewTab === 'present' ? rosterPresent : viewTab === 'absent' ? rosterAbsent : rosterAll;
+  const rsQ = (rsSearch || '').trim().toLowerCase();
+  const rosterFilt = rsQ ? rosterList.filter(s => studentNameOf(s).toLowerCase().includes(rsQ) || studentIdOf(s).toLowerCase().includes(rsQ)) : rosterList;
+
+  if (!currentLecturer) return html`<${LecturerLogin} onLogin=${handleLogin} />`;
+
+  return html`
+    <div className="min-h-screen bg-page text-ink font-sans flex flex-col no-tap">
+      <!-- Header -->
+      <div className="sticky top-0 z-40 bg-navy text-white px-4 pt-[max(14px,env(safe-area-inset-top))] pb-3 shadow-lg" style=${{background:'linear-gradient(150deg,#12284F 0%,#0F2344 100%)'}}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center">
+            <${IC.ScanLine} className="w-5 h-5 text-blue-200" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-bold leading-tight truncate">${currentLecturer.name}</div>
+            <div className="text-blue-200/50 text-[11px]">No. Gaji ${currentLecturer.noGaji} · KPMIM</div>
+          </div>
+          <button onClick=${handleLogout} aria-label="Log keluar" className=${'w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center text-blue-100/70 hover:bg-white/20 transition-colors ' + FOCUS}>
+            <${IC.LogOut} className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Class chips -->
+      <div className="sticky top-[62px] z-30 bg-page/95 backdrop-blur px-3 pt-3 pb-2 overflow-x-auto scroll-thin">
+        ${classes.length ? html`<div className="flex gap-2">
+          ${classes.map(c => html`
+            <button key=${c.id} onClick=${() => setActiveClassId(c.id)}
+              className=${'h-9 px-4 rounded-full text-[12.5px] font-semibold whitespace-nowrap transition-colors ' + FOCUS + ' ' +
+                (c.id === activeClassId ? 'bg-primary text-white shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]' : 'bg-white border border-line text-muted')}>
+              ${classLabel(c)}
+            </button>`)}
+        </div>` : null}
+      </div>
+
+      <div className="flex-1 px-4 pt-2 pb-28">
+        ${!loaded ? html`
+          <div className="flex flex-col items-center justify-center py-24 text-muted">
+            <${IC.Loader2} className="w-7 h-7 animate-spin text-primary mb-3" />
+            <span className="text-[13px]">Memuat data…</span>
+          </div>`
+        : !classes.length ? html`
+          <div className="flex flex-col items-center justify-center py-24 text-center px-6">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-3"><${IC.ScanLine} className="w-7 h-7" /></div>
+            <div className="text-[15px] font-bold text-navy">Tiada kelas</div>
+            <p className="text-[12px] text-muted mt-1">Tiada kelas dijumpai untuk pensyarah ini. Pastikan data pelajar di Supabase betul.</p>
+          </div>`
+        : cls ? html`
+          <!-- Session card -->
+          <div className="bg-white rounded-2xl border border-line shadow-sm p-4">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted">
+              <${live ? IC.Wifi : IC.WifiOff} className="w-3.5 h-3.5 ${live ? 'text-success' : 'text-muted'}" />
+              ${live ? 'Sinkron masa nyata' : 'Menunggu data…'}
+            </div>
+            <div className="text-[17px] font-extrabold text-navy mt-1 truncate">${classLabel(cls)}</div>
+            <div className="text-[12px] text-muted mt-0.5">${fmtDate(new Date(sdate + 'T00:00:00'))} · ${tS}–${tE}${session ? '' : ' · sesi auto'}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-success/5 border border-success/20 px-3 py-2.5 text-center">
+                <div className="text-[28px] font-extrabold text-success font-mono leading-none">${pres.length}</div>
+                <div className="text-[10px] text-muted font-semibold uppercase tracking-wide mt-1">Hadir</div>
+              </div>
+              <div className="rounded-xl bg-page border border-line px-3 py-2.5 text-center">
+                <div className="text-[28px] font-extrabold text-ink font-mono leading-none">${clsStudents.length}</div>
+                <div className="text-[10px] text-muted font-semibold uppercase tracking-wide mt-1">Jumlah</div>
+              </div>
+            </div>
+            <!-- Sesi bar -->
+            <div className="mt-3 pt-3 border-t border-line">
+              <div className="flex items-center gap-1.5 overflow-x-auto scroll-thin">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-muted shrink-0">Sesi</span>
+                ${(sessionsMap[activeClassId] || []).map(s => html`
+                  <button key=${s.id} onClick=${() => setSelSessionMap(m => ({ ...m, [activeClassId]: s.id }))}
+                    className=${'h-7 px-2.5 rounded-full text-[11px] font-semibold whitespace-nowrap border no-tap ' + (s.id === sessionId ? 'bg-primary text-white border-primary' : 'bg-white border-line text-muted')}>
+                    ${s.date ? s.date.slice(8, 10) + '/' + s.date.slice(5, 7) + (s.startTime ? ' · ' + s.startTime.slice(0, 5) : '') : 'Sesi'}
+                    ${s.archived ? ' 🗂' : ''}
+                  </button>`)}
+                ${!(sessionsMap[activeClassId] || []).length ? html`<span className="text-[11px] text-muted">Belum ada sesi</span>` : null}
+              </div>
+              <div className="mt-2.5 grid grid-cols-3 gap-2">
+                <button onClick=${openNewSession} className=${'inline-flex items-center justify-center gap-1 h-[40px] rounded-xl bg-primary text-white text-[12px] font-semibold no-tap ' + FOCUS}><${IC.Plus} className="w-4 h-4" /> Sesi Baru</button>
+                <button onClick=${() => setSesiMgrOpen(true)} className=${'inline-flex items-center justify-center gap-1 h-[40px] rounded-xl bg-page border border-line text-[12px] font-semibold text-ink no-tap ' + FOCUS}><${IC.Archive} className="w-4 h-4" /> Urus</button>
+                <button onClick=${openSaveModal} className=${'inline-flex items-center justify-center gap-1 h-[40px] rounded-xl bg-success text-white text-[12px] font-semibold no-tap ' + FOCUS}><${IC.Save} className="w-4 h-4" /> Simpan</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Senarai pelajar mengikut kelas -->
+          <div className="mt-4">
+            <div className="grid grid-cols-3 gap-1.5 mb-2">
+              ${[['all', 'Semua', rosterAll.length], ['present', 'Hadir', rosterPresent.length], ['absent', 'Tidak Hadir', rosterAbsent.length]].map(([k, lab, n]) => html`
+                <button key=${k} onClick=${() => setViewTab(k)}
+                  className=${'h-9 rounded-xl text-[11.5px] font-bold border no-tap ' + FOCUS + ' ' + (viewTab === k ? 'bg-navy text-white border-navy' : 'bg-white border-line text-muted')}>
+                  ${lab} <span className="opacity-70">${n}</span>
+                </button>`)}
+            </div>
+            <div className="relative mb-2">
+              <${IC.Search} className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input value=${rsSearch} onChange=${e => setRsSearch(e.target.value)} placeholder="Cari nama / No. ID..."
+                className="w-full h-[40px] pl-9 pr-3 rounded-xl bg-white border border-line text-[12.5px] text-ink placeholder:text-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" />
+            </div>
+            <div className="text-[11px] font-bold text-navy mb-2">${clsStudents.length} pelajar dalam kelas ini · <span className="text-success">${pres.length} hadir</span></div>
+            ${rosterFilt.length ? html`
+              <div className="space-y-1.5">
+                ${rosterFilt.slice(0, 400).map(s => {
+                  const a = att[studentIdOf(s)] || {};
+                  const st = a.status;
+                  const pillCls = st === 'present' ? 'bg-success/10 text-success border-success/30'
+                    : st === 'absent' ? 'bg-danger/10 text-danger border-danger/30'
+                    : 'bg-page text-muted border-dashed border-line';
+                  const pillTxt = st === 'present' ? '✓ Hadir' + (a.time ? ' · ' + a.time : '')
+                    : st === 'absent' ? '✗ Tidak Hadir'
+                    : 'Tandakan';
+                  return html`
+                    <div key=${studentIdOf(s)} className="flex items-center gap-2.5 bg-white border border-line rounded-xl px-3 py-2.5">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center text-[12px] font-bold text-primary font-mono shrink-0">${ini(studentNameOf(s))}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-semibold text-ink truncate">${studentNameOf(s)}</div>
+                        <div className="text-[10px] text-muted font-mono truncate">${studentIdOf(s)}${s.kelas ? ' · ' + s.kelas : ''}</div>
+                      </div>
+                      <button onClick=${() => toggleRoster(s)} className=${'inline-flex items-center h-[34px] px-2.5 rounded-lg border text-[11.5px] font-bold shrink-0 no-tap ' + FOCUS + ' ' + pillCls}>${pillTxt}</button>
+                    </div>`;
+                })}
+              </div>`
+            : html`
+              <div className="bg-white border border-line rounded-xl px-4 py-10 text-center">
+                <div className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-primary mx-auto mb-2"><${IC.ScanLine} className="w-6 h-6" /></div>
+                <div className="text-[13px] font-semibold text-ink">${clsStudents.length ? 'Tiada pelajar sepadan' : 'Tiada pelajar dalam kelas ini'}</div>
+                <p className="text-[11px] text-muted mt-0.5">${clsStudents.length ? 'Cuba tukar carian atau tab di atas.' : 'Tekan butang Scan QR di bawah untuk mula, atau sahkan nilai kelas pelajar (REGISTERED CLASS).'}</p>
+              </div>`}
+          </div>`
+        : null}
+      </div>
+
+      <!-- Big scan button (fixed bottom) -->
+      <div className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-3 bg-gradient-to-t from-page via-page/95 to-transparent">
+        <button onClick=${() => { if (!sessionId) { toast('Tiada sesi aktif — cuba lagi sebentar', 'warn'); return; } setScanStatus('Arahkan QR pada kad pelajar ke kamera'); setScannerOpen(true); }}
+          className="w-full h-[58px] rounded-2xl bg-primary text-white text-[16px] font-bold flex items-center justify-center gap-2.5 shadow-[0_10px_24px_-8px_rgba(37,99,235,0.7)] active:scale-[0.98] transition-transform">
+          <${IC.ScanLine} className="w-6 h-6" /> Scan QR
+        </button>
+      </div>
+
+      ${scannerOpen ? html`<${ScannerModal} status=${scanStatus} count=${pres.length} onManualId=${async id => { const v = (id || '').trim(); if (v) await handleScanText(v); const el = document.getElementById('manual-id'); if (el) el.value = ''; }} onScanImage=${handleScanImage} onClose=${() => setScannerOpen(false)} />` : null}
+      ${sesiMgrOpen ? html`<${SesiManagerMobile} sessions=${sessionsMap[activeClassId] || []} activeSessionId=${sessionId} attMap=${attMap} onSetActive=${setActiveSesi} onArchive=${toggleArchive} onDelete=${s => { if (window.confirm && window.confirm('Padam sesi ini dan semua rekod kehadirannya?')) deleteSesi(s); }} onNew=${openNewSession} onClose=${() => setSesiMgrOpen(false)} onSetTime=${setSessionTime} />` : null}
+      ${newSeshOpen && newSeshDraft ? html`<${NewSessionModalMobile} draft=${newSeshDraft} onClose=${() => setNewSeshOpen(false)} onCreate=${onNewSession} />` : null}
+      ${saveModal ? html`<${SaveSessionModalMobile} info=${saveModal} onConfirm=${confirmSaveSession} onClose=${() => setSaveModal(null)} saving=${saving} />` : null}
+      ${stampOn ? html`<div key=${stampKey} className="stamp">HADIR ✓</div>` : null}
+      <${Toast} msg=${toastMsg} />
+    </div>`;
+}
+
+const app = initializeApp(FIREBASE_CONFIG);
+const db = getFirestore(app);
+const root = createRoot(document.getElementById('root'));
+root.render(html`<${App} />`);
+</script>
+</body>
+</html>
